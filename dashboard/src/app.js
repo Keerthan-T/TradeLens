@@ -4,12 +4,16 @@ import Navbar from './Components/navbar';
 import Home from './Components/home';
 import Footer from './Components/footer';
 import ImportModal from './Components/importModal';
-import { fifoMatching } from './utils/fifoMatching';
+// import { fifoMatching } from './utils/fifoMatching';
+import { calculateStockAnalytics } from "./utils/tradeCalculations";
+
+import { TEST_CMP } from "./data/testCmp";
+
 
 
 import './utils/groupTransactions';
 import { parseGrowwExcel } from './utils/excelParser';
-import { groupTransactions } from './utils/groupTransactions';
+// import { groupTransactions } from './utils/groupTransactions';
 
 import {
   SAMPLE_BROKER_CSV,
@@ -87,56 +91,77 @@ const testExcelUpload = async (e) => {
   if (!file) return;
 
   try {
+    console.log("NEW ANALYTICS ENGINE RUNNING");
 
-    // Step 1: Parse Excel
     const transactions = await parseGrowwExcel(file);
 
-    // Step 2: Group consecutive transactions
-    const groups = groupTransactions(transactions);
+    const analytics = calculateStockAnalytics(
+      transactions,
+      TEST_CMP
+    );
 
-    // Step 3: FIFO financial calculations
-    const stockSummary = fifoMatching(transactions);
+    console.log(
+      "Total transactions:",
+      transactions.length
+    );
 
-    console.log("Total transactions:", transactions.length);
+    console.log(
+      "Total stocks:",
+      analytics.length
+    );
 
-    console.log("Total groups:", groups.length);
-
-    console.log("Total unique stocks:", stockSummary.length);
-
-    // Display stock-wise financial summary
     console.table(
-      stockSummary.map((stock) => ({
+      analytics.map((stock) => ({
+
         Symbol: stock.symbol,
 
         Bought: stock.totalBoughtQty,
+
         Sold: stock.totalSoldQty,
+
         Holding: stock.holdingQty,
 
-        AvgBuy: stock.averageBuyPrice?.toFixed(2),
+        CMP:
+          stock.currentPrice?.toFixed(2) ?? "N/A",
 
-        AvgSell: stock.averageSellPrice?.toFixed(2),
+        Realized:
+          stock.realizedPnL.toFixed(2),
 
-        AvgHolding: stock.averageHoldingPrice?.toFixed(2),
+        Unrealized:
+          stock.unrealizedPnL?.toFixed(2) ?? "N/A",
 
-        SoldBuyAvg: stock.averageSoldBuyPrice?.toFixed(2),
+        TotalPnL:
+          stock.totalPnL?.toFixed(2) ?? "N/A",
 
-        RealizedPnL: stock.realizedPnL.toFixed(2),
+        HoldingValue:
+          stock.holdingValue?.toFixed(2) ?? "N/A",
 
-        HoldingCost: stock.holdingCost.toFixed(2),
+        MissedProfit:
+          stock.missedProfit?.toFixed(2) ?? "N/A",
 
-        UnmatchedSell: stock.unmatchedSellQty,
+        LossAvoided:
+          stock.lossAvoided?.toFixed(2) ?? "N/A",
 
         Status: stock.status
+
       }))
     );
 
-    // Detailed Hindustan Copper analysis
-    console.log(
-      "Hindustan Copper FIFO:",
-      stockSummary.find(
-        (stock) => stock.symbol === "HINDCOPPER"
-      )
+    // Test both graphs using Hindustan Copper
+    const hindCopper = analytics.find(
+      (stock) => stock.symbol === "HINDCOPPER"
     );
+
+    if (hindCopper) {
+
+      console.log("GRAPH 1: Overall Average");
+
+      console.table(hindCopper.averageGraph);
+
+      console.log("GRAPH 2: Transaction History");
+
+      console.table(hindCopper.transactionGraph);
+    }
 
   } catch (error) {
 

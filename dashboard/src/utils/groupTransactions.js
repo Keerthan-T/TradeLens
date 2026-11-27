@@ -61,49 +61,5 @@ export function groupTransactions(transactions) {
 
   return groups;
 }
-const testTransactions = [
-  {
-    symbol: 'HINDCOPPER',
-    type: 'BUY',
-    qty: 5,
-    price: 500,
-    date: '2026-11-16'
-  },
-  {
-    symbol: 'HINDCOPPER',
-    type: 'BUY',
-    qty: 5,
-    price: 520,
-    date: '2026-11-17'
-  },
-  {
-    symbol: 'TATASTEEL',
-    type: 'BUY',
-    qty: 10,
-    price: 150,
-    date: '2026-11-18'
-  },
-  {
-    symbol: 'HINDCOPPER',
-    type: 'BUY',
-    qty: 10,
-    price: 550,
-    date: '2026-11-19'
-  },
-  {
-    symbol: 'HINDCOPPER',
-    type: 'BUY',
-    qty: 5,
-    price: 580,
-    date: '2026-11-20'
-  },
-  {
-    symbol: 'HINDCOPPER',
-    type: 'SELL',
-    qty: 25,
-    price: 600,
-    date: '2026-11-23'
-  }
-];
 
-console.table(groupTransactions(testTransactions));
+
