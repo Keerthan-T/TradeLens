@@ -1,388 +1,234 @@
-import React, { useState, useMemo } from 'react';
-
+import React, { useMemo, useState } from 'react';
 import Navbar from './Components/navbar';
 import Home from './Components/home';
 import Footer from './Components/footer';
 import ImportModal from './Components/importModal';
-// import { fifoMatching } from './utils/fifoMatching';
-import { calculateStockAnalytics } from "./utils/tradeCalculations";
-
-import { TEST_CMP } from "./data/testCmp";
-
-
-
-import './utils/groupTransactions';
+import { calculateStockAnalytics } from './utils/tradeCalculations';
 import { parseGrowwExcel } from './utils/excelParser';
-// import { groupTransactions } from './utils/groupTransactions';
+import { TEST_CMP } from './data/testCmp';
+import { SAMPLE_BROKER_CSV, SAMPLE_CMP_CSV } from './data/sampleData';
 
-import {
-  SAMPLE_BROKER_CSV,
-  SAMPLE_CMP_CSV
-} from './data/sampleData';
+// Both import formats produce the same dashboard row structure.
+function getCategory(stock) {
+  if (stock.status === 'INCOMPLETE') return 'incomplete';
+  if (!stock.totalSoldQty) return 'holding';
+  if (stock.currentPrice == null || stock.averageSellPrice == null) return 'unknown';
+  if (stock.currentPrice > stock.averageSellPrice * 1.05) return 'early';
+  if (stock.realizedPnL < 0) return 'cutloss';
+  return 'optimal';
+}
 
+function toDashboardTrade(stock) {
+  return {
+    ...stock,
+    id: `STOCK-${stock.symbol}`,
+    category: getCategory(stock)
+  };
+}
 
-// Convert CSV data into trade objects
+// Existing custom CSV format describes paired, completed trades.
 function parseTrades(brokerText, cmpText) {
-
-  const cmpMap = {};
-
+  const cmpMap = new Map();
   cmpText.trim().split('\n').slice(1).forEach((line) => {
-
     const [symbol, cmp] = line.split(',').map((s) => s.trim());
-
-    if (symbol) {
-      cmpMap[symbol.toUpperCase()] = parseFloat(cmp) || 0;
-    }
-
+    if (symbol) cmpMap.set(symbol.toUpperCase(), Number(cmp));
   });
 
   return brokerText.trim().split('\n').slice(1).map((line, idx) => {
-
-    const [symbol, name, qty, buy, sell] =
+    const [rawSymbol, name, qty, buy, sell, buyDate, sellDate] =
       line.split(',').map((s) => s.trim());
+    if (!rawSymbol) return null;
+    const symbol = rawSymbol.toUpperCase();
+    const quantity = Number(qty);
+    const buyPrice = Number(buy);
+    const sellPrice = Number(sell);
+    const currentPrice = cmpMap.get(symbol);
 
-    if (!symbol) return null;
-
-    const buyPrice = parseFloat(buy) || 0;
-    const sellPrice = parseFloat(sell) || 0;
-    const currentPrice = cmpMap[symbol.toUpperCase()];
-
-    // Reject trades with missing or invalid prices
-    if (
-      buyPrice <= 0 ||
-      sellPrice <= 0 ||
-      !Number.isFinite(currentPrice) ||
-      currentPrice <= 0
-    ) {
+    if (![buyPrice, sellPrice, currentPrice].every((v) => Number.isFinite(v) && v > 0)) {
       throw new Error(`Invalid or missing price data for ${symbol}`);
     }
-
-    const quantity = Number(qty);
-
     if (!Number.isInteger(quantity) || quantity <= 0) {
       throw new Error(`Invalid quantity for ${symbol}`);
     }
 
-    let category = 'optimal';
-
-    if (currentPrice > sellPrice * 1.05) {
-      category = 'early';
-    } else if (sellPrice < buyPrice) {
-      category = 'cutloss';
-    }
-
-    return {
-      id: `TRD-${idx + 101}`,
-      symbol: symbol.toUpperCase(),
-      name: name || symbol,
-      qty: quantity,
-      buyPrice,
-      sellPrice,
-      currentPrice,
-      category,
+    const soldCost = buyPrice * quantity;
+    const realizedPnL = (sellPrice - buyPrice) * quantity;
+    const missedProfit = Math.max(0, (currentPrice - sellPrice) * quantity);
+    const lossAvoided = Math.max(0, (sellPrice - currentPrice) * quantity);
+    const averageGraph = [
+      { label: 'Avg Buy', price: buyPrice, type: 'BUY', qty: quantity },
+      { label: 'Avg Sell', price: sellPrice, type: 'SELL', qty: quantity },
+      { label: 'CMP', price: currentPrice, type: 'CMP' }
+    ];
+    const transactionGraph = [
+      { label: 'Buy 1', price: buyPrice, type: 'BUY', qty: quantity, startDate: buyDate, endDate: buyDate, orderCount: 1 },
+      { label: 'Sell 1', price: sellPrice, type: 'SELL', qty: quantity, startDate: sellDate, endDate: sellDate, orderCount: 1 },
+      { label: 'CMP', price: currentPrice, type: 'CMP' }
+    ];
+    const stock = {
+      id: `TRD-${idx + 101}`, symbol, name: name || symbol,
+      totalBoughtQty: quantity, totalSoldQty: quantity,
+      matchedSoldQty: quantity, holdingQty: 0, holdingCost: 0,
+      averageBuyPrice: buyPrice, averageSellPrice: sellPrice,
+      averageSoldBuyPrice: buyPrice, averageHoldingPrice: null,
+      currentPrice, soldCost, matchedSellValue: sellPrice * quantity,
+      realizedPnL, unrealizedPnL: 0, totalPnL: realizedPnL,
+      realizedReturn: realizedPnL / soldCost * 100,
+      unrealizedReturn: null, holdingValue: 0,
+      missedProfit, lossAvoided, unmatchedSellQty: 0,
+      status: 'FULLY EXITED', averageGraph, transactionGraph
     };
-
+    return { ...stock, category: getCategory(stock) };
   }).filter(Boolean);
 }
-const testExcelUpload = async (e) => {
 
-  const file = e.target.files[0];
-
-  if (!file) return;
-
-  try {
-    console.log("NEW ANALYTICS ENGINE RUNNING");
-
-    const transactions = await parseGrowwExcel(file);
-
-    const analytics = calculateStockAnalytics(
-      transactions,
-      TEST_CMP
-    );
-
-    console.log(
-      "Total transactions:",
-      transactions.length
-    );
-
-    console.log(
-      "Total stocks:",
-      analytics.length
-    );
-
-    console.table(
-      analytics.map((stock) => ({
-
-        Symbol: stock.symbol,
-
-        Bought: stock.totalBoughtQty,
-
-        Sold: stock.totalSoldQty,
-
-        Holding: stock.holdingQty,
-
-        CMP:
-          stock.currentPrice?.toFixed(2) ?? "N/A",
-
-        Realized:
-          stock.realizedPnL.toFixed(2),
-
-        Unrealized:
-          stock.unrealizedPnL?.toFixed(2) ?? "N/A",
-
-        TotalPnL:
-          stock.totalPnL?.toFixed(2) ?? "N/A",
-
-        HoldingValue:
-          stock.holdingValue?.toFixed(2) ?? "N/A",
-
-        MissedProfit:
-          stock.missedProfit?.toFixed(2) ?? "N/A",
-
-        LossAvoided:
-          stock.lossAvoided?.toFixed(2) ?? "N/A",
-
-        Status: stock.status
-
-      }))
-    );
-
-    // Test both graphs using Hindustan Copper
-    const hindCopper = analytics.find(
-      (stock) => stock.symbol === "HINDCOPPER"
-    );
-
-    if (hindCopper) {
-
-      console.log("GRAPH 1: Overall Average");
-
-      console.table(hindCopper.averageGraph);
-
-      console.log("GRAPH 2: Transaction History");
-
-      console.table(hindCopper.transactionGraph);
-    }
-
-  } catch (error) {
-
-    console.error(error.message);
-
-  }
-};
-
+// KPIs use all rows, not just the filtered table.
+function buildPortfolioMetrics(trades) {
+  const exited = trades.filter((t) => t.status === 'FULLY EXITED');
+  const wins = exited.filter((t) => t.realizedPnL > 0).length;
+  const losses = exited.filter((t) => t.realizedPnL < 0).length;
+  const breakEven = exited.length - wins - losses;
+  const sold = trades.filter((t) => t.totalSoldQty > 0);
+  const pricedSales = sold.filter((t) => t.missedProfit != null && t.status !== 'INCOMPLETE');
+  const incompleteCount = trades.filter((t) => t.status === 'INCOMPLETE').length;
+  const totalRealized = trades.reduce((sum, t) => sum + t.realizedPnL, 0);
+  const totalMissed = pricedSales.length || !sold.length
+    ? pricedSales.reduce((sum, t) => sum + t.missedProfit, 0)
+    : null;
+  const fullCoverage = pricedSales.length === sold.length && incompleteCount === 0;
+  return {
+    totalRealized, totalMissed, totalTrades: exited.length,
+    wins, losses, breakEven, incompleteCount,
+    winRate: exited.length ? Math.round(wins / exited.length * 100) : null,
+    oppRatio: fullCoverage && totalMissed != null && totalRealized !== 0
+      ? Math.round(totalMissed / Math.abs(totalRealized) * 100) : null,
+    pricedSalesCount: pricedSales.length,
+    soldCount: sold.length,
+    fullCoverage
+  };
+}
 
 export default function App() {
-
-  // Application states
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('overview');
   const [tableFilter, setTableFilter] = useState('all');
   const [selectedId, setSelectedId] = useState('');
-
-  // Import modal state
+  const [rawTransactions, setRawTransactions] = useState([]);
+  const [isExcelMode, setIsExcelMode] = useState(false);
+  const [cmpData, setCmpData] = useState(TEST_CMP);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isExcelLoading, setIsExcelLoading] = useState(false);
+  const [brokerFileName, setBrokerFileName] = useState('Zerodha_Trades_Q1.csv (demo)');
+  const [cmpFileName, setCmpFileName] = useState('Demo CMP (sample)');
+  const [priceSource, setPriceSource] = useState('Demo prices — not live');
+  const [csvTrades, setCsvTrades] = useState(() => parseTrades(SAMPLE_BROKER_CSV, SAMPLE_CMP_CSV));
 
-  // CSV file names
-  const [brokerFileName, setBrokerFileName] =
-    useState('Zerodha_Trades_Q1.csv');
+  // Future market API only needs to update cmpData.
+  const trades = useMemo(() => isExcelMode
+    ? calculateStockAnalytics(rawTransactions, cmpData).map(toDashboardTrade)
+    : csvTrades, [isExcelMode, rawTransactions, cmpData, csvTrades]);
 
-  const [cmpFileName, setCmpFileName] =
-    useState('NSE_Live_Feed.csv');
+  const summaryMetrics = useMemo(() => buildPortfolioMetrics(trades), [trades]);
 
-  // Initialize sample stock data
-  const [trades, setTrades] = useState(() =>
-    parseTrades(SAMPLE_BROKER_CSV, SAMPLE_CMP_CSV)
-  );
-
-
-  // Calculate portfolio-wide KPI metrics
-  const summaryMetrics = useMemo(() => {
-
-    let totalRealized = 0;
-    let totalMissed = 0;
-    let wins = 0;
-    let losses = 0;
-
-    trades.forEach((t) => {
-
-      const pnl = (t.sellPrice - t.buyPrice) * t.qty;
-
-      totalRealized += pnl;
-
-      if (pnl >= 0) {
-        wins++;
-      } else {
-        losses++;
-      }
-
-      if (t.currentPrice > t.sellPrice) {
-        totalMissed +=
-          (t.currentPrice - t.sellPrice) * t.qty;
-      }
-
-    });
-
-    const totalTrades = trades.length;
-
-    return {
-      totalRealized,
-      totalMissed,
-      totalTrades,
-      wins,
-      losses,
-
-      winRate: totalTrades
-        ? Math.round((wins / totalTrades) * 100)
-        : 0,
-
-      oppRatio: totalRealized !== 0
-        ? Math.round(
-            (totalMissed / Math.abs(totalRealized)) * 100
-          )
-        : 0,
-    };
-
-  }, [trades]);
-
-
-  // Search and filter trades
   const filteredTrades = useMemo(() => {
-
-    const q = searchQuery.toLowerCase();
-
+    const q = searchQuery.trim().toLowerCase();
     return trades.filter((t) => {
-
-      const matchesSearch =
-        t.symbol.toLowerCase().includes(q) ||
-        t.name.toLowerCase().includes(q);
-
-      const matchesFilter =
-        tableFilter === 'all' ||
-        t.category === tableFilter;
-
-      return matchesSearch && matchesFilter;
-
+      const matchesSearch = t.symbol.toLowerCase().includes(q) || (t.name || '').toLowerCase().includes(q);
+      return matchesSearch && (tableFilter === 'all' || t.category === tableFilter);
     });
-
   }, [trades, searchQuery, tableFilter]);
 
+  // Never show a stock that is hidden by the current search/filter.
+  const selectedTrade = filteredTrades.find((t) => t.id === selectedId) || filteredTrades[0];
 
-  // Selected stock for chart
-  const selectedTrade =
-    trades.find((t) => t.id === selectedId) || trades[0];
-
-
-  // Reset dashboard to sample data
-  const handleReset = () => {
-
-    setTrades(
-      parseTrades(SAMPLE_BROKER_CSV, SAMPLE_CMP_CSV)
-    );
-
-    setBrokerFileName('Zerodha_Trades_Q1.csv');
-    setCmpFileName('NSE_Live_Feed.csv');
-
+  const resetSelection = () => {
     setSelectedId('');
     setSearchQuery('');
     setTableFilter('all');
     setActiveTab('overview');
-
   };
 
-
-  // Open CSV import modal
-  const handleImportClick = () => {
-    setIsImportModalOpen(true);
-  };
-
-
-  // Receive and process uploaded CSV files
-  const handleImport = (
-    brokerText,
-    cmpText,
-    brokerName,
-    cmpName
-  ) => {
-
-    const parsedTrades = parseTrades(brokerText, cmpText);
-
-    if (parsedTrades.length === 0) {
-      throw new Error('No valid trades found in the CSV file.');
+  const testExcelUpload = async (e) => {
+    const input = e.target;
+    const file = input.files?.[0];
+    if (!file) return;
+    setIsExcelLoading(true);
+    try {
+      const transactions = await parseGrowwExcel(file);
+      const analytics = calculateStockAnalytics(transactions, TEST_CMP);
+      if (!analytics.length) throw new Error('No valid stock analytics found.');
+      setRawTransactions(transactions);
+      setCmpData(TEST_CMP);
+      setIsExcelMode(true);
+      setBrokerFileName(file.name);
+      setCmpFileName('Test CMP (fictional)');
+      setPriceSource('Test CMP — fictional, not live');
+      resetSelection();
+    } catch (error) {
+      console.error('Excel import failed:', error);
+      alert(error.message || 'Failed to import Excel file.');
+    } finally {
+      input.value = '';
+      setIsExcelLoading(false);
     }
+  };
 
-    // Update dashboard data
-    setTrades(parsedTrades);
+  const handleReset = () => {
+    if (isExcelLoading) return;
+    setRawTransactions([]);
+    setCmpData(TEST_CMP);
+    setIsExcelMode(false);
+    setCsvTrades(parseTrades(SAMPLE_BROKER_CSV, SAMPLE_CMP_CSV));
+    setBrokerFileName('Zerodha_Trades_Q1.csv (demo)');
+    setCmpFileName('Demo CMP (sample)');
+    setPriceSource('Demo prices — not live');
+    resetSelection();
+  };
 
-    // Update displayed file names
+  const handleImportClick = () => {
+    if (!isExcelLoading) setIsImportModalOpen(true);
+  };
+
+  const handleImport = (brokerText, cmpText, brokerName, cmpName) => {
+    const parsed = parseTrades(brokerText, cmpText);
+    if (!parsed.length) throw new Error('No valid trades found in the CSV file.');
+    setCsvTrades(parsed);
+    setRawTransactions([]);
+    setCmpData(TEST_CMP);
+    setIsExcelMode(false);
     setBrokerFileName(brokerName);
     setCmpFileName(cmpName);
-
-    // Select first imported stock
-    setSelectedId(parsedTrades[0].id);
-
-    // Reset search and filters
-    setSearchQuery('');
-    setTableFilter('all');
-    setActiveTab('overview');
-
-    // Close import modal
+    setPriceSource('Imported CMP — not a live feed');
+    resetSelection();
     setIsImportModalOpen(false);
-
   };
 
-
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#0b0f19',
-        color: '#f1f5f9',
-        display: 'flex',
-        flexDirection: 'column'
-      }}
-    >
+    <div style={{ minHeight: '100vh', backgroundColor: '#0b0f19', color: '#f1f5f9', display: 'flex', flexDirection: 'column' }}>
+      <Navbar searchQuery={searchQuery} setSearchQuery={setSearchQuery} onImportClick={handleImportClick} />
 
-      <Navbar
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        onImportClick={handleImportClick}
-      />
-      <div className="p-3">
+      {/* Temporary Excel control; permanent import modal comes in a later step. */}
+      <div className="container-fluid px-4 pt-3">
+        <div className="d-flex flex-wrap align-items-center gap-2">
+          <label htmlFor="groww-excel" className="small text-secondary">Import Groww order history</label>
+          <input id="groww-excel" type="file" accept=".xlsx" className="form-control form-control-sm w-auto mw-100" onChange={testExcelUpload} disabled={isExcelLoading || isImportModalOpen} />
+          {isExcelLoading && <span className="small text-info" role="status">Reading workbook…</span>}
+        </div>
+      </div>
 
-  <input
-    type="file"
-    accept=".xlsx"
-    className="form-control"
-    onChange={testExcelUpload}
-  />
-
-</div>
-
+      {/* One Home component for both data sources. */}
       <Home
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        tradesCount={trades.length}
-        brokerFileName={brokerFileName}
-        cmpFileName={cmpFileName}
-        onReset={handleReset}
-        summaryMetrics={summaryMetrics}
-        filteredTrades={filteredTrades}
-        selectedTrade={selectedTrade}
-        setSelectedId={setSelectedId}
-        tableFilter={tableFilter}
-        setTableFilter={setTableFilter}
+        activeTab={activeTab} setActiveTab={setActiveTab}
+        tradesCount={isExcelMode ? rawTransactions.length : trades.length}
+        brokerFileName={brokerFileName} cmpFileName={cmpFileName}
+        onReset={handleReset} summaryMetrics={summaryMetrics}
+        filteredTrades={filteredTrades} selectedTrade={selectedTrade}
+        setSelectedId={setSelectedId} tableFilter={tableFilter}
+        setTableFilter={setTableFilter} priceSource={priceSource}
+        keyboardEnabled={!isImportModalOpen && !isExcelLoading}
       />
-
       <Footer />
-
-      {/* CSV Import Modal */}
-      {isImportModalOpen && (
-        <ImportModal
-          onClose={() => setIsImportModalOpen(false)}
-          onImport={handleImport}
-        />
-      )}
-
+      {isImportModalOpen && <ImportModal onClose={() => setIsImportModalOpen(false)} onImport={handleImport} />}
     </div>
   );
 }

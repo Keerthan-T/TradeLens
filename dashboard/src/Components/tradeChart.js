@@ -1,406 +1,113 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { BrainCircuit } from 'lucide-react';
 import { formatINR } from '../utils/formatINR';
+import PriceChart from './priceChart';
 
 const PANEL_BG = '#111827';
 const INNER_BG = '#0b0f19';
+const fmtPrice = (v) => v == null || !Number.isFinite(v) ? 'N/A' : `₹${v.toFixed(2)}`;
+const fmtMoney = (v) => v == null ? 'N/A' : formatINR(v);
+const fmtPct = (v) => v == null ? 'N/A' : `${v.toFixed(2)}%`;
+const pnlClass = (v) => v == null || v === 0 ? 'text-secondary' : v > 0 ? 'text-success' : 'text-danger';
 
-export default function TradeChart({ trade }) {
+function Metric({ label, value, color }) {
+  return <div className="col-6"><div className="rounded-2 border border-secondary p-2 h-100" style={{ backgroundColor: INNER_BG }}>
+    <div className="text-secondary" style={{ fontSize: '0.625rem' }}>{label}</div>
+    <div className={`fw-bold ${color}`}>{value}</div>
+  </div></div>;
+}
 
-  if (!trade) return null;
-
-  // Financial calculations
-  const realized =
-    (trade.sellPrice - trade.buyPrice) * trade.qty;
-
-  const missed = Math.max(
-    0,
-    (trade.currentPrice - trade.sellPrice) * trade.qty
-  );
-
-  const missedPct = trade.sellPrice
-    ? Math.max(
-        0,
-        ((trade.currentPrice - trade.sellPrice) /
-          trade.sellPrice) * 100
-      )
-    : 0;
-
-  const totalPct = trade.buyPrice
-    ? ((trade.currentPrice - trade.buyPrice) /
-        trade.buyPrice) * 100
-    : 0;
-
-  const realizedPct = trade.buyPrice
-    ? ((trade.sellPrice - trade.buyPrice) /
-        trade.buyPrice) * 100
-    : 0;
-
-  const efficiency = totalPct > 0
-    ? Math.round(
-        Math.min(100, Math.max(0, (realizedPct / totalPct) * 100))
-      )
-    : null;
-
-
-  // Selling decision assessment
-  const assessment =
-    trade.category === 'early'
-      ? `You exited ${trade.symbol} at ₹${trade.sellPrice}. 
-         The stock gained an additional ${missedPct.toFixed(1)}% post-sale.`
-
-      : trade.currentPrice < trade.sellPrice
-      ? `The current price of ${trade.symbol} is below your selling price.`
-
-      : 'The stock has shown limited additional upside since your exit.';
-
-
-  // Dynamic graph coordinates
-  const prices = [
-    trade.buyPrice,
-    trade.sellPrice,
-    trade.currentPrice
-  ];
-
-  const minPrice = Math.min(...prices);
-  const maxPrice = Math.max(...prices);
-
-  const priceRange = maxPrice - minPrice;
-
-  const getY = (price) => {
-    if (priceRange === 0) return 90;
-
-    return 150 - ((price - minPrice) / priceRange) * 120;
-  };
-
-  const buyY = getY(trade.buyPrice);
-  const sellY = getY(trade.sellPrice);
-  const cmpY = getY(trade.currentPrice);
-
-  // Dynamic line colours
-  const holdColor =
-    trade.sellPrice >= trade.buyPrice
-      ? '#10b981'
-      : '#ef4444';
-
-  const postExitColor =
-    trade.currentPrice >= trade.sellPrice
-      ? '#3b82f6'
-      : '#ef4444';
-
+// Both charts share the same vertical space. Hovering one expands it
+// and shrinks its sibling, so the surrounding dashboard stays stable.
+function ChartPair({ trade, priceSource }) {
+  const [activeChart, setActiveChart] = useState(null);
+  const getSize = (name) => activeChart == null ? 'normal' : activeChart === name ? 'expanded' : 'compact';
+  const activate = (name) => setActiveChart(name);
+  const clear = () => setActiveChart(null);
 
   return (
-    <div
-      className="card h-100 rounded-4 border-secondary shadow-lg"
-      style={{ backgroundColor: PANEL_BG }}
-    >
-      <div className="card-body p-4 d-flex flex-column gap-3">
-
-        {/* Stock Header */}
-        <div className="d-flex align-items-center justify-content-between pb-3 border-bottom border-secondary">
-
-          <div className="d-flex align-items-center gap-3">
-
-            <span
-              className="d-inline-flex align-items-center justify-content-center rounded-3 border border-warning bg-warning bg-opacity-10 text-warning fw-bold font-monospace"
-              style={{
-                width: 40,
-                height: 40,
-                fontSize: '0.875rem'
-              }}
-            >
-              {trade.symbol.substring(0, 2)}
-            </span>
-
-            <div>
-              <h3 className="h6 fw-bold text-white mb-0">
-                {trade.name}
-              </h3>
-
-              <p className="small text-secondary font-monospace mb-0">
-                Buy: ₹{trade.buyPrice} |
-                Exit: ₹{trade.sellPrice} |
-                CMP: ₹{trade.currentPrice}
-              </p>
-            </div>
-
-          </div>
-
-          <span className="small font-monospace bg-secondary bg-opacity-25 text-light border border-secondary rounded px-2 py-1">
-            {trade.symbol}
-          </span>
-
-        </div>
-
-
-        {/* Dynamic Price Graph */}
-        <div
-          className="rounded-3 border border-secondary p-3"
-          style={{ backgroundColor: INNER_BG }}
-        >
-
-          {/* Graph Legend */}
-          <div className="d-flex justify-content-between small font-monospace mb-3">
-
-            <span
-              className="d-flex align-items-center gap-1"
-              style={{ color: holdColor }}
-            >
-              ● Hold Period
-            </span>
-
-            <span
-              className="d-flex align-items-center gap-1"
-              style={{ color: postExitColor }}
-            >
-              ● Post-Exit
-            </span>
-
-          </div>
-
-
-          <div style={{ height: 220 }}>
-
-            <svg
-              width="100%"
-              height="100%"
-              viewBox="0 0 500 210"
-            >
-
-              {/* Horizontal grid lines */}
-              {[30, 90, 150].map((y) => (
-                <line
-                  key={y}
-                  x1="0"
-                  y1={y}
-                  x2="500"
-                  y2={y}
-                  stroke="#1f2937"
-                  strokeDasharray="4 4"
-                />
-              ))}
-
-              {/* Selling point divider */}
-              <line
-                x1="250"
-                y1="10"
-                x2="250"
-                y2="170"
-                stroke="#ef4444"
-                strokeDasharray="3 3"
-              />
-
-
-              {/* Buy to Sell line */}
-              <path
-                d={`M 60 ${buyY} L 250 ${sellY}`}
-                fill="none"
-                stroke={holdColor}
-                strokeWidth="3"
-                strokeLinecap="round"
-              />
-
-
-              {/* Sell to CMP line */}
-              <path
-                d={`M 250 ${sellY} L 440 ${cmpY}`}
-                fill="none"
-                stroke={postExitColor}
-                strokeWidth="3"
-                strokeDasharray="5 5"
-                strokeLinecap="round"
-              />
-
-
-              {/* Buy Marker */}
-              <circle
-                cx="60"
-                cy={buyY}
-                r="6"
-                fill="#10b981"
-              />
-
-              <text
-                x="60"
-                y={buyY - 12}
-                textAnchor="middle"
-                fill="#10b981"
-                fontSize="13"
-                fontWeight="bold"
-              >
-                ₹{trade.buyPrice}
-              </text>
-
-
-              {/* Sell Marker */}
-              <circle
-                cx="250"
-                cy={sellY}
-                r="7"
-                fill="#ef4444"
-              />
-
-              <text
-                x="250"
-                y={sellY - 12}
-                textAnchor="middle"
-                fill="#ef4444"
-                fontSize="13"
-                fontWeight="bold"
-              >
-                ₹{trade.sellPrice}
-              </text>
-
-
-              {/* CMP Marker */}
-              <circle
-                cx="440"
-                cy={cmpY}
-                r="7"
-                fill="#3b82f6"
-                stroke="#ffffff"
-                strokeWidth="2"
-              />
-
-              <text
-                x="440"
-                y={cmpY - 12}
-                textAnchor="middle"
-                fill="#60a5fa"
-                fontSize="13"
-                fontWeight="bold"
-              >
-                ₹{trade.currentPrice}
-              </text>
-
-
-              {/* Bottom Labels */}
-              <text
-                x="60"
-                y="190"
-                textAnchor="middle"
-                fill="#94a3b8"
-                fontSize="12"
-              >
-                BUY
-              </text>
-
-              <text
-                x="250"
-                y="190"
-                textAnchor="middle"
-                fill="#94a3b8"
-                fontSize="12"
-              >
-                SELL
-              </text>
-
-              <text
-                x="440"
-                y="190"
-                textAnchor="middle"
-                fill="#94a3b8"
-                fontSize="12"
-              >
-                CMP
-              </text>
-
-            </svg>
-
-          </div>
-
-        </div>
-
-
-        {/* Selling Decision Assessment */}
-        <div
-          className="rounded-3 border border-secondary p-3 font-monospace small"
-          style={{ backgroundColor: '#161f33' }}
-        >
-
-          <div className="d-flex align-items-center justify-content-between mb-3">
-
-            <span className="text-secondary d-flex align-items-center gap-2 fw-medium">
-              <BrainCircuit size={16} color="#a78bfa" />
-              Selling Decision Assessment
-            </span>
-
-            <span className="fw-bold text-info">
-              {efficiency === null
-                ? 'Efficiency: N/A'
-                : `${efficiency}% Efficiency`}
-            </span>
-
-          </div>
-
-
-          <div className="row g-2 text-center mb-3">
-
-            {/* Realized Profit */}
-            <div className="col-6">
-
-              <div
-                className="rounded-2 border border-secondary p-2"
-                style={{ backgroundColor: INNER_BG }}
-              >
-
-                <div
-                  className="text-secondary"
-                  style={{ fontSize: '0.625rem' }}
-                >
-                  REALIZED PROFIT
-                </div>
-
-                <div
-                  className={`fw-bold ${
-                    realized >= 0
-                      ? 'text-success'
-                      : 'text-danger'
-                  }`}
-                >
-                  {realized >= 0 ? '+' : ''}
-                  {formatINR(realized)}
-                </div>
-
-              </div>
-
-            </div>
-
-
-            {/* Missed Upside */}
-            <div className="col-6">
-
-              <div
-                className="rounded-2 border border-secondary p-2"
-                style={{ backgroundColor: INNER_BG }}
-              >
-
-                <div
-                  className="text-secondary"
-                  style={{ fontSize: '0.625rem' }}
-                >
-                  MISSED UPSIDE
-                </div>
-
-                <div className="fw-bold text-warning">
-                  {formatINR(missed)}
-                </div>
-
-              </div>
-
-            </div>
-
-          </div>
-
-
-          <p className="text-light small lh-base mb-0 pt-2 border-top border-secondary">
-            {assessment}
-          </p>
-
-        </div>
-
+    <div className="tl-chart-pair" onPointerLeave={(event) => {
+      if (event.pointerType !== 'touch') clear();
+    }} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) clear();
+    }}>
+      <div className="tl-chart-slot" onPointerEnter={(event) => {
+        if (event.pointerType !== 'touch') activate('average');
+      }}>
+        <PriceChart title="Overall Weighted Average"
+          subtitle="Historical buy / exit averages and latest available CMP"
+          points={trade.averageGraph} priceSource={priceSource}
+          size={getSize('average')} onActivate={() => activate('average')} />
       </div>
+      <div className="tl-chart-slot" onPointerEnter={(event) => {
+        if (event.pointerType !== 'touch') activate('history');
+      }}>
+        <PriceChart title="Grouped Transaction History"
+          subtitle="Recorded executions in order, not a continuous price chart"
+          points={trade.transactionGraph} priceSource={priceSource}
+          size={getSize('history')} onActivate={() => activate('history')} />
+      </div>
+      <div className="d-flex align-items-center justify-content-between gap-2 small text-secondary">
+        <span>Hover to enlarge · Tap or use ← / → to inspect</span>
+        <button type="button" className="btn btn-sm btn-outline-secondary py-0" onClick={clear}>Equal size</button>
+      </div>
+    </div>
+  );
+}
 
+export default function TradeChart({ trade, priceSource }) {
+  if (!trade) return <div className="card h-100 rounded-4 border-secondary shadow-lg" style={{ backgroundColor: PANEL_BG }}><div className="card-body p-4 text-secondary">No matching stock. Clear the search or change the filter.</div></div>;
+  const hasSales = trade.matchedSoldQty > 0;
+  const complete = trade.status !== 'INCOMPLETE';
+  // Comparable sold-share cost basis, not the historical average of all purchases.
+  const potentialProfit = trade.currentPrice == null || !hasSales ? null : trade.currentPrice * trade.matchedSoldQty - trade.soldCost;
+  const efficiency = complete && potentialProfit != null && potentialProfit > 0 ? Math.round(Math.max(0, Math.min(100, trade.realizedPnL / potentialProfit * 100))) : null;
+  let assessment;
+  if (!complete) assessment = 'Transaction history is incomplete. Displayed P&L covers matched orders only.';
+  else if (!hasSales) assessment = 'No shares sold yet. Evaluate the current holding and its acquisition cost; exit metrics are not applicable.';
+  else if (trade.currentPrice == null) assessment = 'CMP is unavailable. Realized P&L is calculated from recorded trades; post-sale metrics are unavailable.';
+  else if (trade.missedProfit > 0 && trade.lossAvoided > 0) assessment = 'Some sales were below the current snapshot and others above it. Both missed upside and avoided declines are shown.';
+  else if (trade.missedProfit > 0) assessment = 'The current price is above one or more recorded selling prices. Missed upside compares those sales against CMP.';
+  else if (trade.lossAvoided > 0) assessment = 'The current price is below one or more recorded selling prices. The difference represents a hypothetical avoided decline.';
+  else assessment = 'The current price is unchanged relative to recorded selling prices.';
+  return (
+    <div className="card h-100 rounded-4 border-secondary shadow-lg" style={{ backgroundColor: PANEL_BG }}>
+      <div className="card-body p-3 p-xl-4 d-flex flex-column gap-3">
+        <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 pb-3 border-bottom border-secondary">
+          <div className="d-flex align-items-center gap-3" style={{ minWidth: 0 }}>
+            <span className="d-inline-flex align-items-center justify-content-center rounded-3 border border-warning bg-warning bg-opacity-10 text-warning fw-bold font-monospace flex-shrink-0" style={{ width: 40, height: 40, fontSize: '0.875rem' }}>{trade.symbol.substring(0, 2)}</span>
+            <div style={{ minWidth: 0 }}>
+              <h3 className="h6 fw-bold text-white mb-0">{trade.name}</h3>
+              <p className="small text-secondary font-monospace mb-0">Buy: {fmtPrice(trade.averageBuyPrice)} | Exit: {fmtPrice(trade.averageSellPrice)} | CMP: {fmtPrice(trade.currentPrice)}</p>
+              <p className="small text-secondary mb-0">{trade.totalBoughtQty} bought · {trade.totalSoldQty} sold · {trade.holdingQty} held</p>
+            </div>
+          </div>
+          <div className="d-flex flex-column align-items-end gap-1">
+            <span className="small font-monospace bg-secondary bg-opacity-25 text-light border border-secondary rounded px-2 py-1">{trade.symbol}</span>
+            <span className="small text-info">{trade.status}</span>
+          </div>
+        </div>
+        <div className="small text-warning">{priceSource}</div>
+        <ChartPair key={trade.id} trade={trade} priceSource={priceSource} />
+        <div className="rounded-3 border border-secondary p-3 font-monospace small" style={{ backgroundColor: '#161f33' }}>
+          <div className="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+            <span className="text-secondary d-flex align-items-center gap-2 fw-medium"><BrainCircuit size={16} color="#a78bfa" />{hasSales ? 'Selling Decision Assessment' : 'Holding Performance Assessment'}</span>
+            <span className="fw-bold text-info">{efficiency == null ? 'Efficiency: N/A' : `${efficiency}% Efficiency`}</span>
+          </div>
+          <div className="row g-2 text-center mb-3">
+            <Metric label="REALIZED PROFIT" value={fmtMoney(trade.realizedPnL)} color={pnlClass(trade.realizedPnL)} />
+            <Metric label="MISSED UPSIDE" value={fmtMoney(trade.missedProfit)} color="text-warning" />
+            <Metric label="UNREALIZED P&L" value={fmtMoney(trade.unrealizedPnL)} color={pnlClass(trade.unrealizedPnL)} />
+            <Metric label="LOSS AVOIDED" value={fmtMoney(trade.lossAvoided)} color="text-success" />
+            <Metric label="HOLDING AVG PRICE" value={fmtPrice(trade.averageHoldingPrice)} color="text-light" />
+            <Metric label="HOLDING VALUE" value={fmtMoney(trade.holdingValue)} color="text-info" />
+            <Metric label="REALIZED RETURN" value={fmtPct(trade.realizedReturn)} color={pnlClass(trade.realizedReturn)} />
+            <Metric label="UNREALIZED RETURN" value={fmtPct(trade.unrealizedReturn)} color={pnlClass(trade.unrealizedReturn)} />
+          </div>
+          <p className="text-light small lh-base mb-0 pt-2 border-top border-secondary">{assessment}</p>
+          <p className="text-secondary small mb-0 mt-2">Total P&amp;L: <span className={pnlClass(trade.totalPnL)}>{fmtMoney(trade.totalPnL)}</span> · Gross, before charges. Exit verdicts are CMP-based heuristics.</p>
+        </div>
+      </div>
     </div>
   );
 }
