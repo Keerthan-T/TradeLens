@@ -115,9 +115,8 @@ export default function App() {
   const [selectedId, setSelectedId] = useState('');
   const [rawTransactions, setRawTransactions] = useState([]);
   const [isExcelMode, setIsExcelMode] = useState(false);
-  const [cmpData, setCmpData] = useState(TEST_CMP);
+  const [cmpData, setCmpData] = useState({});
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [isExcelLoading, setIsExcelLoading] = useState(false);
   const [brokerFileName, setBrokerFileName] = useState('Zerodha_Trades_Q1.csv (demo)');
   const [cmpFileName, setCmpFileName] = useState('Demo CMP (sample)');
   const [priceSource, setPriceSource] = useState('Demo prices — not live');
@@ -148,35 +147,29 @@ export default function App() {
     setActiveTab('overview');
   };
 
-  const testExcelUpload = async (e) => {
-    const input = e.target;
-    const file = input.files?.[0];
-    if (!file) return;
-    setIsExcelLoading(true);
-    try {
-      const transactions = await parseGrowwExcel(file);
-      const analytics = calculateStockAnalytics(transactions, TEST_CMP);
-      if (!analytics.length) throw new Error('No valid stock analytics found.');
-      setRawTransactions(transactions);
-      setCmpData(TEST_CMP);
-      setIsExcelMode(true);
-      setBrokerFileName(file.name);
-      setCmpFileName('Test CMP (fictional)');
-      setPriceSource('Test CMP — fictional, not live');
-      resetSelection();
-    } catch (error) {
-      console.error('Excel import failed:', error);
-      alert(error.message || 'Failed to import Excel file.');
-    } finally {
-      input.value = '';
-      setIsExcelLoading(false);
+  // Import one Groww workbook. Actual prices will be populated by the backend later.
+  const handleExcelImport = async (file, { useTestPrices = false } = {}) => {
+    if (!file || !/\.xlsx$/i.test(file.name)) {
+      throw new Error('Select a Groww order history .xlsx file.');
     }
+    const transactions = await parseGrowwExcel(file);
+    const prices = useTestPrices ? TEST_CMP : {};
+    const analytics = calculateStockAnalytics(transactions, prices);
+    if (!analytics.length) throw new Error('No valid stock analytics found.');
+
+    // Only replace the existing dashboard after parsing and validation succeed.
+    setRawTransactions(transactions);
+    setCmpData(prices);
+    setIsExcelMode(true);
+    setBrokerFileName(file.name);
+    setCmpFileName(useTestPrices ? 'Test CMP (fictional)' : 'Not connected');
+    setPriceSource(useTestPrices ? 'Test CMP — fictional, not live' : 'Market prices unavailable — API not connected');
+    resetSelection();
   };
 
   const handleReset = () => {
-    if (isExcelLoading) return;
     setRawTransactions([]);
-    setCmpData(TEST_CMP);
+    setCmpData({});
     setIsExcelMode(false);
     setCsvTrades(parseTrades(SAMPLE_BROKER_CSV, SAMPLE_CMP_CSV));
     setBrokerFileName('Zerodha_Trades_Q1.csv (demo)');
@@ -186,7 +179,7 @@ export default function App() {
   };
 
   const handleImportClick = () => {
-    if (!isExcelLoading) setIsImportModalOpen(true);
+    setIsImportModalOpen(true);
   };
 
   const handleImport = (brokerText, cmpText, brokerName, cmpName) => {
@@ -194,27 +187,17 @@ export default function App() {
     if (!parsed.length) throw new Error('No valid trades found in the CSV file.');
     setCsvTrades(parsed);
     setRawTransactions([]);
-    setCmpData(TEST_CMP);
+    setCmpData({});
     setIsExcelMode(false);
     setBrokerFileName(brokerName);
     setCmpFileName(cmpName);
     setPriceSource('Imported CMP — not a live feed');
     resetSelection();
-    setIsImportModalOpen(false);
   };
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#0b0f19', color: '#f1f5f9', display: 'flex', flexDirection: 'column' }}>
       <Navbar searchQuery={searchQuery} setSearchQuery={setSearchQuery} onImportClick={handleImportClick} />
-
-      {/* Temporary Excel control; permanent import modal comes in a later step. */}
-      <div className="container-fluid px-4 pt-3">
-        <div className="d-flex flex-wrap align-items-center gap-2">
-          <label htmlFor="groww-excel" className="small text-secondary">Import Groww order history</label>
-          <input id="groww-excel" type="file" accept=".xlsx" className="form-control form-control-sm w-auto mw-100" onChange={testExcelUpload} disabled={isExcelLoading || isImportModalOpen} />
-          {isExcelLoading && <span className="small text-info" role="status">Reading workbook…</span>}
-        </div>
-      </div>
 
       {/* One Home component for both data sources. */}
       <Home
@@ -225,10 +208,16 @@ export default function App() {
         filteredTrades={filteredTrades} selectedTrade={selectedTrade}
         setSelectedId={setSelectedId} tableFilter={tableFilter}
         setTableFilter={setTableFilter} priceSource={priceSource}
-        keyboardEnabled={!isImportModalOpen && !isExcelLoading}
+        keyboardEnabled={!isImportModalOpen}
       />
       <Footer />
-      {isImportModalOpen && <ImportModal onClose={() => setIsImportModalOpen(false)} onImport={handleImport} />}
+      {isImportModalOpen && (
+        <ImportModal
+          onClose={() => setIsImportModalOpen(false)}
+          onExcelImport={handleExcelImport}
+          onCsvImport={handleImport}
+        />
+      )}
     </div>
   );
 }
